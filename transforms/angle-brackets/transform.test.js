@@ -1,9 +1,14 @@
 'use strict';
 
 const transform = require('./transform');
+const invokableData = require('./telemetry/mock-invokables');
+const { getInvokableData } = require('./telemetry/invokable');
 
 function runTest(path, source, options) {
-  return transform({ path, source }, options);
+  return transform({ path, source }, options, getInvokableData(invokableData));
+}
+function runTestWithData(path, source, options, data) {
+  return transform({ path, source }, options, data);
 }
 
 test('action-params', () => {
@@ -246,6 +251,7 @@ test('html-tags', () => {
 
     <div data-foo="{{if someThing yas nah}}"></div>
     <div {{on 'click' this.foo}}></div>
+    <div class="" style="margin-bottom:20px" {{action "updateSetup"  on="change"}}></div>
   `;
 
   expect(runTest('html-tags.hbs', input)).toMatchInlineSnapshot(`
@@ -270,6 +276,7 @@ test('html-tags', () => {
 
         <div data-foo=\\"{{if someThing yas nah}}\\"></div>
         <div {{on 'click' this.foo}}></div>
+        <div class=\\"\\" style=\\"margin-bottom:20px\\" {{action \\"updateSetup\\"  on=\\"change\\"}}></div>
       "
   `);
 });
@@ -942,6 +949,22 @@ test('custom-options', () => {
   `);
 });
 
+test('regex-options', () => {
+  let input = `
+    {{some-component foo=true}}
+  `;
+
+  let options = {
+    skipFilesThatMatchRegex: /[A-F]oo|[A-Z]ar/gim,
+  };
+
+  expect(runTest('regex-options.hbs', input, options)).toMatchInlineSnapshot(`
+    "
+        {{some-component foo=true}}
+      "
+  `);
+});
+
 test('preserve arguments', () => {
   let input = `
     {{foo-bar class="baz"}}
@@ -1024,13 +1047,14 @@ test('hyphens with nested usage', () => {
   `);
 });
 
-test('wallstreet.hbs', () => {
+test('wallstreet', () => {
   let input = `
-    {{#foo-bar$baz-bang/foo-bar::bang}}
+    {{#foo-bar$baz-bang/foo-bar/bang}}
       <div ...attributes>
         {{foo bar="baz"}}
       </div>
-    {{/foo-bar$baz-bang/foo-bar::bang}}
+    {{/foo-bar$baz-bang/foo-bar/bang}}
+    {{foo-bar$baz-bang/foo-bar/bang}}
   `;
 
   expect(runTest('wallstreet.hbs', input)).toMatchInlineSnapshot(`
@@ -1040,6 +1064,69 @@ test('wallstreet.hbs', () => {
             <Foo @bar=\\"baz\\" />
           </div>
         </FooBar$BazBang::FooBar::Bang>
+        <FooBar$BazBang::FooBar::Bang />
+      "
+  `);
+});
+
+test('wallstreet-telemetry', () => {
+  let input = `
+    {{nested$helper}}
+    {{nested::helper}}
+    {{nested$helper param="cool!"}}
+    {{nested::helper param="yeah!"}}
+    {{helper-1}}
+  `;
+
+  expect(runTest('wallstreet-telemetry.hbs', input)).toMatchInlineSnapshot(`
+    "
+        {{nested$helper}}
+        {{nested::helper}}
+        {{nested$helper param=\\"cool!\\"}}
+        {{nested::helper param=\\"yeah!\\"}}
+        {{helper-1}}
+      "
+  `);
+});
+
+test('attr-space', () => {
+  let input = `
+    <MyComp::Test @color={{"custom-2"}} @visible={{Group.item.isNew}} />
+    <MyComp::Test @color="custom-2" @visible={{Group.item.isNew}} />
+    <MyComp @value={{value}} @cont={{this}} @class={{model.some-stuff-here}} />
+  `;
+
+  expect(runTest('attr-space.hbs', input)).toMatchInlineSnapshot(`
+      "
+          <MyComp::Test @color={{\\"custom-2\\"}} @visible={{Group.item.isNew}} />
+          <MyComp::Test @color=\\"custom-2\\" @visible={{Group.item.isNew}} />
+          <MyComp @value={{value}} @cont={{this}} @class={{model.some-stuff-here}} />
+        "
+    `);
+});
+
+test('No telemetry', () => {
+  let input = `
+    {{#my-card as |card|}}
+      {{card.title title="My Card Title"}}
+      {{#card.content}}
+        <p>hello</p>
+      {{/card.content}}
+      {{card.foo-bar}}
+      {{card.foo}}
+    {{/my-card}}
+  `;
+
+  expect(runTestWithData('no-telemetry.hbs', input, {}, {})).toMatchInlineSnapshot(`
+    "
+        {{#my-card as |card|}}
+          {{card.title title=\\"My Card Title\\"}}
+          {{#card.content}}
+            <p>hello</p>
+          {{/card.content}}
+          {{card.foo-bar}}
+          {{card.foo}}
+        {{/my-card}}
       "
   `);
 });

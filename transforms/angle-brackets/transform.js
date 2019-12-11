@@ -1,7 +1,7 @@
 const recast = require('ember-template-recast');
 const logger = require('../../lib/logger');
 
-const IGNORE_MUSTACHE_STATEMENTS = require('./known-helpers');
+const KNOWN_HELPERS = require('./known-helpers');
 const _EMPTY_STRING_ = `ANGLE_BRACKET_EMPTY_${Date.now()}`;
 const { builders: b } = recast;
 
@@ -10,6 +10,8 @@ const { builders: b } = recast;
  */
 const HTML_ATTRIBUTES = ['class', 'placeholder', 'required'];
 const BUILT_IN_COMPONENTS = ['link-to', 'input', 'textarea'];
+
+let inAttr = false;
 
 function isAttribute(key) {
   return HTML_ATTRIBUTES.includes(key) || isDataAttribute(key);
@@ -25,6 +27,10 @@ function isBuiltInComponent(key) {
 
 function isNestedComponentTagName(tagName) {
   return tagName && tagName.includes && (tagName.includes('/') || tagName.includes('-'));
+}
+
+function isWallStreet(tagName) {
+  return tagName.includes('$') || tagName.includes('::');
 }
 
 /**
@@ -48,7 +54,7 @@ function transformTagName(tagName) {
       return char.toUpperCase();
     }
 
-    // Remove all occurances of '-'s from the tagName that aren't starting with `-`
+    // Remove all occurrences of '-'s from the tagName that aren't starting with `-`
     return char === '-' ? '' : char.toLowerCase();
   });
 
@@ -90,7 +96,7 @@ function shouldSkipFile(fileInfo, config) {
 
   if (config.skipFilesThatMatchRegex && config.skipFilesThatMatchRegex.test(source)) {
     logger.warn(
-      `WARNING: ${fileInfo.path} was not skipped as its content matches the "skipFilesThatMatchRegex" config setting: ${config.skipFilesThatMatchRegex}`
+      `WARNING: ${fileInfo.path} was skipped as its content matches the "skipFilesThatMatchRegex" config setting: ${config.skipFilesThatMatchRegex}`
     );
     return true;
   }
@@ -264,8 +270,28 @@ function getNonDataAttributesFromParams(params) {
   return params.filter(p => !(p.original && `${p.original}`.startsWith('data-')));
 }
 
-function shouldIgnoreMustacheStatement(name, config) {
-  return IGNORE_MUSTACHE_STATEMENTS.includes(name) || config.helpers.includes(name);
+function shouldIgnoreMustacheStatement(fullName, config, invokableData) {
+  let { helpers, components } = invokableData;
+  let isTelemetryData = !!(helpers || components);
+
+  let name = fullName;
+  // replace `::` with `/`, and ignore the path before $
+  if (isWallStreet(name)) {
+    name = name
+      .split('$')
+      .pop()
+      .replace('::', '/');
+  }
+
+  if (isTelemetryData) {
+    let mergedHelpers = [...KNOWN_HELPERS, ...(helpers || [])];
+    let isHelper = mergedHelpers.includes(name) || config.helpers.includes(name);
+    let isComponent = [...(components || []), ...BUILT_IN_COMPONENTS].includes(name);
+    let strName = `${name}`; // coerce boolean and number to string
+    return (isHelper || !isComponent) && !strName.includes('.');
+  } else {
+    return !(KNOWN_HELPERS.includes(name) && config.helpers.includes(name));
+  }
 }
 
 function nodeHasPositionalParameters(node) {
@@ -299,7 +325,7 @@ function transformNode(node, fileInfo, config) {
     return;
   }
 
-  const newTagName = transformTagName(tagName);
+  const newTagName = transformTagName(tagName, inAttr);
 
   let attributes;
   let children = node.program ? node.program.body : undefined;
@@ -327,6 +353,10 @@ function transformNode(node, fileInfo, config) {
       );
       return;
     }
+
+    if (inAttr) {
+      return;
+    }
     attributes = transformNodeAttributes(tagName, node);
   }
   return b.element(
@@ -343,7 +373,7 @@ function subExpressionToMustacheStatement(subExpression) {
   return b.mustache(subExpression.path, subExpression.params, subExpression.hash);
 }
 
-module.exports = function transform(fileInfo, config) {
+module.exports = function transform(fileInfo, config, invokableData = {}) {
   config = config || {};
   config.helpers = config.helpers || [];
   config.skipBuiltInComponents =
@@ -354,8 +384,8 @@ module.exports = function transform(fileInfo, config) {
     return fileInfo.source;
   }
 
-  let { code: toAngleBracket } = recast.transform(fileInfo.source, env =>
-    transformToAngleBracket(env, fileInfo, config)
+  let { code: toAngleBracket } = recast.transform(fileInfo.source, () =>
+    transformToAngleBracket(fileInfo, config, invokableData)
   );
 
   let attrEqualEmptyString = new RegExp(_EMPTY_STRING_, 'gi');
@@ -366,17 +396,17 @@ module.exports = function transform(fileInfo, config) {
   return toAngleBracket;
 };
 
-function transformToAngleBracket(_, fileInfo, config) {
+function transformToAngleBracket(fileInfo, config, invokableData) {
   /**
    * Transform the attributes names & values properly
    */
   return {
     MustacheStatement(node) {
+      const tagName = `${node.path && node.path.original}`;
       // Don't change attribute statements
       const isValidMustache =
         node.loc.source !== '(synthetic)' &&
-        !shouldIgnoreMustacheStatement(node.path.original, config);
-      const tagName = node.path && node.path.original;
+        !shouldIgnoreMustacheStatement(tagName, config, invokableData);
       const isNestedComponent = isNestedComponentTagName(tagName);
 
       if (
@@ -387,9 +417,21 @@ function transformToAngleBracket(_, fileInfo, config) {
       }
     },
     BlockStatement(node) {
-      if (!shouldIgnoreMustacheStatement(node.path.original, config)) {
+      let tagName = `${node.path.original}`;
+      if (
+        !shouldIgnoreMustacheStatement(node.path.original, config, invokableData) ||
+        isWallStreet(tagName)
+      ) {
         return transformNode(node, fileInfo, config);
       }
+    },
+    AttrNode: {
+      enter() {
+        inAttr = true;
+      },
+      exit() {
+        inAttr = false;
+      },
     },
   };
 }
