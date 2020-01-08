@@ -1,6 +1,6 @@
 {
   "name": "ember-angle-brackets-codemod",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Codemod to convert to Angle brackets syntax",
   "keywords": [
     "codemod-cli",
@@ -35,15 +35,15 @@
   "dependencies": {
     "codemod-cli": "^2.1.0",
     "ember-codemods-telemetry-helpers": "^1.1.0",
-    "ember-template-recast": "^3.3.0",
+    "ember-template-recast": "^3.3.1",
     "winston": "^3.2.1",
     "debug": "^4.1.1"
   },
   "devDependencies": {
     "coveralls": "^3.0.9",
-    "eslint": "^6.7.2",
-    "eslint-config-prettier": "^6.7.0",
-    "eslint-plugin-prettier": "^3.1.1",
+    "eslint": "^6.8.0",
+    "eslint-config-prettier": "^6.9.0",
+    "eslint-plugin-prettier": "^3.1.2",
     "execa": "^3.4.0",
     "jest": "^24.9.0",
     "prettier": "^1.19.1",
